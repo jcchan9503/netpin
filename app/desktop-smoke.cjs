@@ -53,9 +53,10 @@ module.exports=async function desktopSmoke(window,call){
     while(Date.now()<end && !(await window.webContents.executeJavaScript(`document.querySelector('#content h1')?.textContent===${JSON.stringify(title)}`)))await new Promise(r=>setTimeout(r,75));
     if(!(await window.webContents.executeJavaScript(`document.querySelector('#content h1')?.textContent===${JSON.stringify(title)}`)))throw Error('Screenshot page did not finish: '+nav);
     await new Promise(r=>setTimeout(r,200));
+    if (await window.webContents.executeJavaScript('document.documentElement.scrollWidth > document.documentElement.clientWidth + 1')) throw Error('Horizontal viewport overflow: '+nav);
     fs.writeFileSync(path.join(out,`electron-${nav}.png`),(await window.webContents.capturePage()).toPNG());
   }
   const csv=await call('exportCsv',{id:'demo-net'});if(!csv.content.includes('192.0.2.21'))throw Error('Export backend failed');
-  fs.writeFileSync(path.join(out,'electron-smoke.json'),JSON.stringify({...result,csvExport:true,electron:process.versions.electron,node:process.versions.node,platform:process.platform,arch:process.arch,sandboxDisabledForRootTest:process.argv.includes('--no-sandbox')},null,2));
+  fs.writeFileSync(path.join(out,'electron-smoke.json'),JSON.stringify({...result,csvExport:true,horizontalLayout:true,electron:process.versions.electron,node:process.versions.node,platform:process.platform,arch:process.arch,sandboxDisabledForRootTest:process.argv.includes('--no-sandbox')},null,2));
   console.log('NETPIN_DESKTOP_SMOKE_PASS',JSON.stringify(result));return result;
 };
