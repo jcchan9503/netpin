@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: netpin-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   prepare:
     runs-on: ubuntu-22.04
@@ -104,12 +104,13 @@ jobs:
           npm run test:desktop
           if ($LASTEXITCODE -ne 0) { throw 'Desktop smoke failed' }
       - name: Build installers
+        timeout-minutes: 8
         shell: bash
         run: |
           if [ '${{ matrix.platform }}' = windows ]; then
-            npm run dist:win
+            npm run dist:win -- --config.electronDist=node_modules/electron/dist 2>&1 | tee test-results/build.txt
           else
-            npm run dist:linux:${{ matrix.arch }}
+            npm run dist:linux:${{ matrix.arch }} -- --config.electronDist=node_modules/electron/dist 2>&1 | tee test-results/build.txt
           fi
           node scripts/package-metadata.mjs
       - name: Install DEB and launch installed app
@@ -120,6 +121,7 @@ jobs:
           package=$(find release -maxdepth 1 -name '*.deb' -print -quit)
           bash scripts/install-linux.sh "$package"
           timeout 90 xvfb-run -a -s '-screen 0 1440x1000x24' /opt/NetPin/netpin --smoke-test 2>&1 | tee test-results/installed-desktop.txt
+          test -f test-results/installed/electron-smoke.json
       - name: Install EXE and launch installed app
         if: runner.os == 'Windows'
         shell: pwsh
