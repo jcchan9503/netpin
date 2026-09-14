@@ -29,22 +29,31 @@ uname -m
 cat /etc/os-release
 ```
 
-`x86_64` 选 `linux-x64`；`aarch64` 选 `linux-arm64`。龙芯 LoongArch、MIPS、申威 SW64 不在这个运行时的交付范围内，脚本会明确拒绝，不能改文件名伪装成支持。
+`x86_64` 选 Linux x64 分发包；`aarch64` 选 Linux ARM64 分发包。DEB 和 RPM 对架构的命名不同，实际文件如下：
+
+| CPU | DEB 文件 | RPM 文件 |
+| --- | --- | --- |
+| x86_64 | `NetPin-0.1.0-linux-amd64.deb` | `NetPin-0.1.0-linux-x86_64.rpm` |
+| ARM64 | `NetPin-0.1.0-linux-arm64.deb` | `NetPin-0.1.0-linux-aarch64.rpm` |
+
+龙芯 LoongArch、MIPS、申威 SW64 不在这个运行时的交付范围内，脚本会明确拒绝，不能改文件名伪装成支持。
 
 统信 UOS、银河麒麟等系统根据包管理器选择 DEB 或 RPM。**发行版名称本身不是兼容保证**，还需核实版本、glibc、图形库、权限和单位白名单。当前测试的是通用 Linux 环境，未获得你的具体信创系统镜像。
 
 将对应安装包、`SHA256SUMS` 和脚本放在同一目录后运行：
 
 ```bash
-bash install-linux.sh ./NetPin-0.1.0-linux-x64.deb
-# ARM64 举例
+# x86_64 / amd64
+bash install-linux.sh ./NetPin-0.1.0-linux-amd64.deb
+# ARM64
 bash install-linux.sh ./NetPin-0.1.0-linux-arm64.deb
-# 使用 RPM 的系统，传入对应 .rpm 文件
+# 使用 RPM 的 x86_64 系统
+bash install-linux.sh ./NetPin-0.1.0-linux-x86_64.rpm
 ```
 
 脚本校验 SHA256、包名和 CPU，然后调用本机 `dpkg` 或 `rpm`；不下载、不自动修复依赖、不更改安全策略。缺少图形库或 `ping` 时，请由系统管理员通过批准的离线软件源补齐。GUI 以普通用户运行，不应使用 root，不要添加 `--no-sandbox`。安装包的 post-install 设置 Chromium sandbox helper 的标准权限。
 
-`tar.gz` 是便携分发/诊断用目录包，不等于已经处理依赖和 sandbox 权限的系统安装器。日常使用优先 DEB/RPM。
+`tar.gz` 是便携分发/诊断用目录包，不等于已经处理依赖和 sandbox 权限的系统安装器。日常使用优先 DEB/RPM。此次已实际安装和测试 DEB；RPM 已构建，但未在 RPM 发行版上完成安装测试。
 
 ## 开发者：在外网构建机安装依赖，成品转移至内网
 
