@@ -16,12 +16,14 @@ jobs:
           node-version: '24'
       - name: Install pinned build and runtime dependencies
         run: |
-          mkdir -p .ci-toolchain
-          cd .ci-toolchain
-          npm init -y
-          npm install --no-audit --no-fund electron@44.3.0 net-snmp@3.29.1 electron-builder@26.0.12
+          mkdir -p netpin-toolchain
+          cd netpin-toolchain
+          cat > package.json <<'JSON'
+          {"name":"netpin","version":"0.1.0","private":true,"license":"UNLICENSED","type":"module","engines":{"node":">=22.16.0"},"dependencies":{"net-snmp":"3.29.1"},"devDependencies":{"electron":"44.3.0","electron-builder":"26.0.12"}}
+          JSON
+          npm install --no-audit --no-fund
           cd ..
-          tar -czf netpin-toolchain-linux-x64.tar.gz -C .ci-toolchain node_modules package-lock.json
+          tar -czf netpin-toolchain-linux-x64.tar.gz -C netpin-toolchain node_modules package-lock.json
           sha256sum netpin-toolchain-linux-x64.tar.gz > netpin-toolchain-linux-x64.sha256
       - uses: actions/upload-artifact@v4
         with:
