@@ -1,0 +1,113 @@
+{
+  "name": "netpin",
+  "version": "0.1.0",
+  "description": "NetPin 网踪 — offline desktop IPAM and read-only network discovery",
+  "private": true,
+  "type": "module",
+  "main": "app/main.cjs",
+  "author": {
+    "name": "jcchan9503",
+    "email": "166371419+jcchan9503@users.noreply.github.com"
+  },
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "demo": "electron . --demo",
+    "preview": "node scripts/preview.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:integration": "node --test tests/snmp.integration.mjs",
+    "test:desktop": "electron . --smoke-test",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:linux:x64": "electron-builder --linux deb rpm tar.gz --x64 --publish never",
+    "dist:linux:arm64": "electron-builder --linux deb rpm tar.gz --arm64 --publish never",
+    "build:helpers": "node scripts/build-helpers.mjs",
+    "prestart": "npm run build:helpers",
+    "predemo": "npm run build:helpers",
+    "predist:win": "npm run build:helpers"
+  },
+  "dependencies": {
+    "net-snmp": "3.29.1"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "io.netpin.desktop",
+    "productName": "NetPin",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "app/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "app/native/**"
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "scripts/installer.nsh",
+      "artifactName": "NetPin-${version}-win10-${arch}-setup.${ext}"
+    },
+    "linux": {
+      "executableName": "netpin",
+      "category": "Network",
+      "maintainer": "jcchan9503 <166371419+jcchan9503@users.noreply.github.com>",
+      "synopsis": "Offline desktop IP address management",
+      "artifactName": "NetPin-${version}-linux-${arch}.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "NetPin 网踪",
+          "Comment": "IP、MAC 与交换机端口关联管理"
+        }
+      }
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnss3",
+        "libasound2",
+        "libgbm1",
+        "libxss1",
+        "libxtst6",
+        "libsecret-1-0",
+        "iputils-ping"
+      ],
+      "afterInstall": "scripts/linux-after-install.sh"
+    },
+    "rpm": {
+      "depends": [
+        "gtk3",
+        "nss",
+        "alsa-lib",
+        "mesa-libgbm",
+        "libXScrnSaver",
+        "libXtst",
+        "libsecret",
+        "iputils"
+      ],
+      "afterInstall": "scripts/linux-after-install.sh"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jcchan9503/netpin.git"
+  },
+  "homepage": "https://github.com/jcchan9503/netpin"
+}
