@@ -29,7 +29,7 @@ export function locate(net, mac, devices, snapshot, now = Date.now()) {
     for (const f of snap.sections.fdb.rows) {
       if (f.mac !== mac || (net.vlan != null && f.vlans.length && !f.vlans.includes(net.vlan))) continue;
       const iface = snap.sections.interfaces?.rows.find(i => i.ifIndex === f.ifIndex);
-      const unknown = !f.vlans.length || net.vlan == null || f.ifIndex == null || !isFresh(snap.sections.interfaces, now);
+      const unknown = f.vlans.length !== 1 || net.vlan == null || f.ifIndex == null || !isFresh(snap.sections.interfaces, now);
       rows.push({ deviceId: id, device: device.name, ifIndex: f.ifIndex, port: iface?.name || `桥端口 ${f.bridgePort}`,
         description: iface?.description || '', vlans: f.vlans, at: snap.sections.fdb.at,
         confidence: device.uplinks.includes(f.ifIndex) ? '下联 / 上联方向' : unknown ? '候选方向（VLAN/接口待确认）' : '接入口候选' });
@@ -38,10 +38,10 @@ export function locate(net, mac, devices, snapshot, now = Date.now()) {
   return rows;
 }
 export function usageRow(net, ip, assignment, observation, currentMappings, devices, snapshot, now = Date.now()) {
-  const mapped = currentMappings.get(ip) || [], dynamic = mapped.filter(r => !r.static);
+  const mapped = currentMappings.get(ip) || [], dynamic = mapped.filter(r => r.type === 3 && !r.static);
   const o = observation || {}, latestReply = o.probeStatus === 'reply' && now - Date.parse(o.probeAt) >= -5000 && now - Date.parse(o.probeAt) < FRESH_MS;
   let discovery = latestReply ? 'responding' : dynamic.length ? 'mapped' :
-    o.lastSeen || mapped.length ? 'historical' : o.probeStatus === 'no-reply' && now - Date.parse(o.probeAt) < FRESH_MS ? 'unseen' : 'unknown';
+    o.lastSeen || mapped.length ? 'historical' : o.probeStatus === 'no-reply' && now - Date.parse(o.probeAt) >= -5000 && now - Date.parse(o.probeAt) < FRESH_MS ? 'unseen' : 'unknown';
   if ((net.exclusions || []).includes(ip)) discovery = 'excluded';
   const macs = [...new Set(mapped.map(m => m.mac))], historicalMacs = o.macs || [];
   const locations = macs.flatMap(mac => locate(net, mac, devices, snapshot, now).map(l => ({ ...l, mac })));

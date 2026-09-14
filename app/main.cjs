@@ -58,6 +58,7 @@ else {
         if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== page) throw new Error('请求来源不受信任');
         if (JSON.stringify(payload).length > 256000) throw new Error('请求过大');
         if (method === 'switchMode') {
+          if (typeof payload.demo !== 'boolean') throw new Error('工作区参数无效');
           if ((await call('state', {})).active) throw new Error('请先取消当前采集');
           app.relaunch({ args: [...process.argv.slice(1).filter(a => a !== '--demo' && a !== '--smoke-test'), ...(payload.demo ? ['--demo'] : [])] }); app.quit(); return { result: true };
         }
@@ -74,29 +75,13 @@ else {
     await window.loadFile(path.join(__dirname, 'renderer/index.html'));
     window.on('closed', () => { window = null; });
     if (smoke) {
-      const started = Date.now();
-      while (Date.now() - started < 15000 && !(await window.webContents.executeJavaScript('Boolean(window.__netpinReady)'))) await new Promise(r => setTimeout(r, 150));
       try {
-        const result = await window.webContents.executeJavaScript(`(async () => { if (!window.__netpinReady) throw Error('UI not ready');
-          if (typeof require !== 'undefined' || typeof process !== 'undefined') throw Error('Node leaked to renderer');
-          const s = await window.netpin.invoke('state'); if (!s.demo || s.devices.length !== 2) throw Error('IPC fixture failed');
-          const row = (await window.netpin.invoke('subnetView',{id:'demo-net',query:'192.0.2.21'})).rows[0];
-          if (!row.locations.some(l=>l.port==='Gi0/1')) throw Error('Port correlation failed');
-          await window.netpin.invoke('saveAssignment',{netId:'demo-net',ip:'192.0.2.21',status:'reserved',owner:'Desktop smoke',note:'isolated test'});
-          const saved=(await window.netpin.invoke('subnetView',{id:'demo-net',query:'192.0.2.21'})).rows[0];
-          if(saved.management!=='reserved') throw Error('SQLite write/read failed');
-          const c=await window.netpin.invoke('saveCredential',{name:'smoke-only',version:'3',username:'test',authProtocol:'SHA256',authKey:'fixture-only-auth',privKey:'fixture-only-priv'});
-          if(JSON.stringify(await window.netpin.invoke('state')).includes('fixture-only-auth')) throw Error('Secret leaked');
-          await window.netpin.invoke('deleteCredential',{id:c.id});
-          await window.netpin.invoke('resetDemo');
-          document.querySelector('[data-nav="subnets"]').click(); return {devices:s.devices.length, sqlite:true, isolated:true, correlation:true, assignmentRoundtrip:true, credentialSealing:true}; })()`);
-        await new Promise(r => setTimeout(r, 700));
-        const out = path.resolve('test-results'); fs.mkdirSync(out, { recursive: true });
-        fs.writeFileSync(path.join(out, 'electron-smoke.png'), (await window.webContents.capturePage()).toPNG());
-        fs.writeFileSync(path.join(out, 'electron-smoke.json'), JSON.stringify({ ...result, electron: process.versions.electron, platform: process.platform, sandboxDisabledForRootTest: process.argv.includes('--no-sandbox') }, null, 2));
-        console.log('NETPIN_DESKTOP_SMOKE_PASS', JSON.stringify(result)); quitting = true; worker.postMessage({ type: 'close' }); setTimeout(() => app.exit(0), 400);
+        await require('./desktop-smoke.cjs')(window, call);
+        quitting = true; worker.postMessage({ type: 'close' });
+        worker.once('exit', () => app.exit(0)); setTimeout(() => app.exit(0), 4000).unref();
       } catch (e) { console.error('NETPIN_DESKTOP_SMOKE_FAIL', e.message); quitting = true; app.exit(1); }
     }
+
   }).catch(e => { console.error('NetPin startup failed:', e.message); app.exit(1); });
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', e => {
