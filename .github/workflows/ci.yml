@@ -1,0 +1,160 @@
+name: NetPin build and test
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+      - '**.md'
+permissions:
+  contents: read
+concurrency:
+  group: netpin-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Bootstrap a lockfile only when missing
+        id: source
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ ! -f package-lock.json ]; then
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add package-lock.json
+            git commit -m 'build: lock NetPin dependency graph'
+            git push origin "HEAD:$TARGET_BRANCH"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git archive --format=tar.gz --output=netpin-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: netpin-source
+          path: netpin-source.tar.gz
+          retention-days: 7
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows
+            arch: x64
+          - os: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - os: ubuntu-22.04-arm
+            platform: linux
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      USE_SYSTEM_FPM: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Linux build and desktop prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libnss3 libasound2 libgbm1 libxss1 libxtst6 libsecret-1-0 xvfb iputils-ping fonts-noto-cjk ruby ruby-dev build-essential rpm
+          sudo gem install fpm -v 1.16.0 --no-document
+      - name: Locked dependencies and native helper
+        shell: bash
+        run: |
+          npm ci --no-audit --no-fund
+          node -e "console.log(require('electron'))"
+          npm run build:helpers
+          mkdir -p test-results
+      - name: Static checks and unit tests
+        shell: bash
+        run: |
+          npm run check | tee test-results/check.txt
+          npm test | tee test-results/unit.txt
+          npm run test:integration | tee test-results/integration.txt
+      - name: Linux desktop smoke
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          timeout 90 xvfb-run -a -s '-screen 0 1440x1000x24' npm run test:desktop 2>&1 | tee test-results/desktop.txt
+      - name: Windows desktop smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          npm run test:desktop
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop smoke failed' }
+      - name: Build installers
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          if [ '${{ matrix.platform }}' = windows ]; then
+            npm run dist:win -- --config.electronDist=node_modules/electron/dist 2>&1 | tee test-results/build.txt
+          else
+            npm run dist:linux:${{ matrix.arch }} -- --config.electronDist=node_modules/electron/dist 2>&1 | tee test-results/build.txt
+          fi
+          node scripts/package-metadata.mjs
+      - name: Install DEB and launch installed app
+        if: runner.os == 'Linux'
+        env:
+          NETPIN_TEST_OUTPUT: test-results/installed
+        run: |
+          package=$(find release -maxdepth 1 -name '*.deb' -print -quit)
+          bash scripts/install-linux.sh "$package"
+          timeout 90 xvfb-run -a -s '-screen 0 1440x1000x24' /opt/NetPin/netpin --smoke-test 2>&1 | tee test-results/installed-desktop.txt
+          test -f test-results/installed/electron-smoke.json
+      - name: Install EXE and launch installed app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          NETPIN_TEST_OUTPUT: test-results/installed
+        run: |
+          $installer = Get-ChildItem release/NetPin-*-win10-x64-setup.exe | Select-Object -First 1
+          ./scripts/install-windows.ps1 -Installer $installer.FullName -Silent
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs/NetPin/NetPin.exe'
+          if (-not (Test-Path $exe)) { throw "Installed EXE not found: $exe" }
+          $p = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -Wait -PassThru -RedirectStandardOutput "$PWD/test-results/installed.stdout.txt" -RedirectStandardError "$PWD/test-results/installed.stderr.txt"
+          if ($p.ExitCode -ne 0) { throw ('Installed app test failed: ' + $p.ExitCode) }
+          if (-not (Test-Path 'test-results/installed/electron-smoke.json')) { throw 'Installed app did not produce a test result' }
+      - name: Preserve test evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: netpin-evidence-${{ matrix.platform }}-${{ matrix.arch }}
+          path: test-results/
+          retention-days: 7
+      - name: Preserve generated installers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: netpin-installers-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.exe
+            release/*.deb
+            release/*.rpm
+            release/*.tar.gz
+            release/SHA256SUMS
+            release/install-*
+            release/INSTALL.md
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: warn

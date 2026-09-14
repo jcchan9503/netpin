@@ -33,23 +33,33 @@ export function probe(ip, signal, runner = execFile, platform = process.platform
   });
 }
 
-/** A global start-rate limiter, not just a concurrency cap. */
+/** Global start-rate limit plus bounded concurrency; drain all workers on error/cancel. */
 export async function probeMany(addresses, { signal, run = probe, onProgress = () => {}, interval = 100, concurrency = 8 } = {}) {
-  const results = new Map(); let cursor = 0, next = 0;
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32 || !Number.isFinite(interval) || interval < 0) throw new Error('探测并发或速率参数无效');
+  signal?.throwIfAborted();
+  const local = new AbortController(), combined = signal ? AbortSignal.any([signal, local.signal]) : local.signal;
+  const results = new Map(); let cursor = 0, next = 0, firstError;
   const workers = Array.from({ length: Math.min(concurrency, addresses.length) }, async () => {
-    while (cursor < addresses.length) {
-      signal?.throwIfAborted();
-      const ip = addresses[cursor++], due = Math.max(Date.now(), next); next = due + interval;
-      await new Promise((resolve, reject) => {
-        const done = () => { signal?.removeEventListener('abort', abort); resolve(); };
-        const timer = setTimeout(done, Math.max(0, due - Date.now()));
-        const abort = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(signal.reason); };
-        signal?.addEventListener('abort', abort, { once: true });
-      });
-      signal?.throwIfAborted();
-      const result = await run(ip, signal); results.set(ip, { ...result, at: new Date().toISOString() });
-      onProgress(results.size, addresses.length);
+    try {
+      while (cursor < addresses.length) {
+        combined.throwIfAborted();
+        const ip = addresses[cursor++], due = Math.max(Date.now(), next); next = due + interval;
+        await new Promise((resolve, reject) => {
+          const done = () => { combined.removeEventListener('abort', abort); resolve(); };
+          const timer = setTimeout(done, Math.max(0, due - Date.now()));
+          const abort = () => { clearTimeout(timer); combined.removeEventListener('abort', abort); reject(combined.reason); };
+          combined.addEventListener('abort', abort, { once: true });
+        });
+        combined.throwIfAborted();
+        const result = await run(ip, combined); combined.throwIfAborted();
+        results.set(ip, { ...result, at: new Date().toISOString() }); onProgress(results.size, addresses.length);
+      }
+    } catch (error) {
+      if (!firstError) firstError = error;
+      local.abort(error);
     }
   });
-  await Promise.all(workers); return results;
+  await Promise.all(workers);
+  if (firstError) throw firstError;
+  return results;
 }

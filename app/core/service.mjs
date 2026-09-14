@@ -51,6 +51,7 @@ export class Service {
   }
   async saveCredential(p) {
     this.editable(); const c = validateCredential(p), sealed = await this.secrets.seal(c);
+    this.editable(); // Recheck after the asynchronous OS-keyring call.
     this.store.put('credential', { id: c.id, name: c.name, version: c.version, ...sealed });
     this.store.event('凭据更新', `${c.name} · SNMPv${c.version} · ${sealed.storage === 'os' ? '系统加密' : '仅本次会话'}`);
     return { id: c.id, storage: sealed.storage };
@@ -158,7 +159,7 @@ export class Service {
       const prior = new Map(this.store.addresses('observations', n.id).map(r => [r.ip, r]));
       this.store.transaction(() => {
         for (const [ip, r] of results) {
-          const old = prior.get(ip) || {}, valid = (map.get(ip) || []).filter(x => !x.static), macs = [...new Set((map.get(ip) || []).map(x => x.mac))];
+          const old = prior.get(ip) || {}, valid = (map.get(ip) || []).filter(x => x.type === 3 && !x.static), macs = [...new Set((map.get(ip) || []).map(x => x.mac))];
           if (r.status === 'error') partial = true;
           if (macs.length && old.macs?.length && [...macs].sort().join() !== [...old.macs].sort().join()) this.store.event('MAC 变化待核实', `${n.name} / ${ip}: ${old.macs.join(',')} → ${macs.join(',')}`);
           this.store.address('observations', n.id, ip, { ...old, probeStatus: r.status, probeAt: r.at, reason: r.reason || '', rtt: r.rtt ?? null,
